@@ -29,6 +29,17 @@ struct ArgsOpt {
     dry_run: bool,
 }
 
+#[derive(Debug, Clone)]
+struct Line {
+    ty: String,
+    path: PathBuf,
+    mode: String,
+    user: String,
+    group: String,
+    age: String,
+    argument: String,
+}
+
 fn main() {
     let args_opt = ArgsOpt::from_args();
 
