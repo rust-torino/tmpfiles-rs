@@ -1,3 +1,5 @@
+mod parser;
+
 use std::path::PathBuf;
 
 use structopt::StructOpt;
