@@ -1,5 +1,8 @@
 use std::convert::TryFrom;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 
+use nom::bytes::complete::take_till;
 use nom::character::complete::{char, one_of, space1};
 use nom::combinator::{map_res, opt};
 use nom::sequence::tuple;
@@ -34,7 +37,7 @@ pub enum ItemTypes {
 #[derive(Debug, PartialEq)]
 pub struct Action<'a> {
     action_type: ItemTypes,
-    path: &'a str,
+    path: &'a OsStr,
     mode: &'a str,
     user: &'a str,
     group: &'a str,
@@ -68,7 +71,7 @@ fn item_type(input: &[u8]) -> IResult<&[u8], (ItemTypes, bool, bool, bool)> {
         opt(char('+')),
         opt(char('-')),
     ))(input)?;
-    let (input, _ ) = space1(input)?;
+    let (input, _) = space1(input)?;
 
     Ok((
         input,
@@ -81,14 +84,23 @@ fn item_type(input: &[u8]) -> IResult<&[u8], (ItemTypes, bool, bool, bool)> {
     ))
 }
 
+fn path(input: &[u8]) -> IResult<&[u8], &OsStr> {
+    // NOTE as per this comment in "opentmpfiles" we keep the parsing simple
+    // > Upstream says whitespace is NOT permitted in the Path argument.
+    //https://github.com/OpenRC/opentmpfiles/blob/09a1675f68d8106ba08acfc72a263843dabdb588/tmpfiles.sh#L505
+    let (input, path_bytes) = take_till(|c| (c as char).is_whitespace())(input)?;
+    Ok((input, OsStr::from_bytes(path_bytes)))
+}
+
 fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, (action_type, boot_only, append_or_force, allow_failure)) = item_type(input)?;
+    let (input, path_os_str) = path(input)?;
 
     Ok((
         input,
         Action {
             action_type,
-            path: "/tmp/z/f",
+            path: path_os_str,
             mode: "0755",
             user: "daemon",
             group: "daemon",
@@ -140,7 +152,7 @@ mod test {
         assert_eq!(
             Action {
                 action_type: ItemTypes::RELABEL_PATH,
-                path: "/tmp/z/f",
+                path: &OsStr::new("/tmp/z/f"),
                 mode: "0755",
                 user: "daemon",
                 group: "daemon",
@@ -150,7 +162,7 @@ mod test {
                 append_or_force: false,
                 allow_failure: false,
             },
-            parse_line(b"z     /tmp/z/f1    0755 daemon daemon - -")
+            parse_line(b"z     /tmp/z/f    0755 daemon daemon - -")
                 .unwrap()
                 .1
         );
@@ -158,7 +170,7 @@ mod test {
         assert_eq!(
             Action {
                 action_type: ItemTypes::CREATE_FILE,
-                path: "/tmp/z/f",
+                path: &OsStr::new("/tmp/z/f"),
                 mode: "0755",
                 user: "daemon",
                 group: "daemon",
@@ -168,7 +180,7 @@ mod test {
                 append_or_force: false,
                 allow_failure: false,
             },
-            parse_line(b"f     /tmp/z/f1    0755 daemon daemon - -")
+            parse_line(b"f     /tmp/z/f    0755 daemon daemon - -")
                 .unwrap()
                 .1
         );
