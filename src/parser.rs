@@ -55,7 +55,7 @@ impl TryFrom<char> for ItemTypes {
         match type_char {
             'f' => Ok(ItemTypes::CREATE_FILE),
             'z' => Ok(ItemTypes::RELABEL_PATH),
-            _ => Err("Not implemented"),
+            other => todo!("Support for type `{}` is missing", other),
         }
     }
 }
