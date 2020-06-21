@@ -1,10 +1,15 @@
 use std::convert::TryFrom;
 use std::ffi::OsStr;
+use std::fs::Permissions;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 
+use btoi::btoi_radix;
+
+use nom::branch::alt;
 use nom::bytes::complete::take_till;
-use nom::character::complete::{char, one_of, space1};
-use nom::combinator::{map_res, opt};
+use nom::character::complete::{char, oct_digit1, one_of, space1};
+use nom::combinator::{map, map_res, opt};
 use nom::sequence::tuple;
 use nom::IResult;
 
@@ -35,10 +40,16 @@ pub enum ItemTypes {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Mode {
+    masked: bool,
+    mode: Permissions,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Action<'a> {
     action_type: ItemTypes,
     path: &'a OsStr,
-    mode: &'a str,
+    mode: Option<Mode>,
     user: &'a str,
     group: &'a str,
     age: &'a str,
@@ -84,6 +95,10 @@ fn item_type(input: &[u8]) -> IResult<&[u8], (ItemTypes, bool, bool, bool)> {
     ))
 }
 
+fn empty_placeholder(input: &[u8]) -> IResult<&[u8], char> {
+    char('-')(input)
+}
+
 fn path(input: &[u8]) -> IResult<&[u8], &OsStr> {
     // NOTE as per this comment in "opentmpfiles" we keep the parsing simple
     // > Upstream says whitespace is NOT permitted in the Path argument.
@@ -92,16 +107,40 @@ fn path(input: &[u8]) -> IResult<&[u8], &OsStr> {
     Ok((input, OsStr::from_bytes(path_bytes)))
 }
 
+fn mode(input: &[u8]) -> IResult<&[u8], Option<Mode>> {
+    alt((
+        map(empty_placeholder, |_| None),
+        map(non_empty_mode, |mode| Some(mode)),
+    ))(input)
+}
+
+fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
+    let (input, masked) = opt(char('~'))(input)?;
+    let (input, mode_digits) = oct_digit1(input)?;
+
+    let octal_permission = btoi_radix(mode_digits, 8).unwrap();
+
+    Ok((
+        input,
+        Mode {
+            masked: masked.is_some(),
+            mode: Permissions::from_mode(octal_permission),
+        },
+    ))
+}
+
 fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, (action_type, boot_only, append_or_force, allow_failure)) = item_type(input)?;
     let (input, path_os_str) = path(input)?;
+    let (input, _) = space1(input)?;
+    let (input, mode) = mode(input)?;
 
     Ok((
         input,
         Action {
             action_type,
             path: path_os_str,
-            mode: "0755",
+            mode: mode,
             user: "daemon",
             group: "daemon",
             age: "-",
@@ -148,12 +187,44 @@ mod test {
     }
 
     #[test]
+    fn test_mode() {
+        assert_eq!(
+            Some(Mode {
+                masked: false,
+                mode: Permissions::from_mode(0o644)
+            }),
+            mode(b"0644").unwrap().1
+        );
+
+        assert_eq!(
+            Some(Mode {
+                masked: false,
+                mode: Permissions::from_mode(0o4755)
+            }),
+            mode(b"04755").unwrap().1
+        );
+
+        assert_eq!(
+            Some(Mode {
+                masked: true,
+                mode: Permissions::from_mode(0o444)
+            }),
+            mode(b"~0444").unwrap().1
+        );
+
+        assert_eq!(None, mode(b"-").unwrap().1);
+    }
+
+    #[test]
     fn test_parse_line() {
         assert_eq!(
             Action {
                 action_type: ItemTypes::RELABEL_PATH,
                 path: &OsStr::new("/tmp/z/f"),
-                mode: "0755",
+                mode: Some(Mode {
+                    masked: false,
+                    mode: Permissions::from_mode(0o755)
+                }),
                 user: "daemon",
                 group: "daemon",
                 age: "-",
@@ -171,7 +242,10 @@ mod test {
             Action {
                 action_type: ItemTypes::CREATE_FILE,
                 path: &OsStr::new("/tmp/z/f"),
-                mode: "0755",
+                mode: Some(Mode {
+                    masked: false,
+                    mode: Permissions::from_mode(0o755)
+                }),
                 user: "daemon",
                 group: "daemon",
                 age: "-",
