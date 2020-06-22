@@ -52,12 +52,18 @@ pub enum User<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum Group<'a> {
+    Name(&'a OsStr),
+    ID(u32),
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Action<'a> {
     action_type: ItemTypes,
     path: &'a OsStr,
     mode: Option<Mode>,
     user: Option<User<'a>>,
-    group: &'a str,
+    group: Option<Group<'a>>,
     age: &'a str,
     argument: &'a str,
     boot_only: bool,
@@ -159,6 +165,19 @@ fn user(input: &[u8]) -> IResult<&[u8], Option<User>> {
     ))(input)
 }
 
+fn group(input: &[u8]) -> IResult<&[u8], Option<Group>> {
+    alt((
+        map(empty_placeholder, |_| None),
+        map(
+            alt((
+                map(user_or_group_id, |gid| Group::ID(gid)),
+                map(user_or_group_name, |groupname| Group::Name(groupname)),
+            )),
+            |group| Some(group),
+        ),
+    ))(input)
+}
+
 fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, (action_type, boot_only, append_or_force, allow_failure)) = item_type(input)?;
     let (input, path_os_str) = path(input)?;
@@ -166,6 +185,8 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, mode) = mode(input)?;
     let (input, _) = space1(input)?;
     let (input, user) = user(input)?;
+    let (input, _) = space1(input)?;
+    let (input, group) = group(input)?;
 
 
     Ok((
@@ -175,7 +196,7 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
             path: path_os_str,
             mode: mode,
             user: user,
-            group: "daemon",
+            group: group,
             age: "-",
             argument: "-",
             boot_only,
@@ -264,6 +285,21 @@ mod test {
     }
 
     #[test]
+    fn test_group() {
+        assert_eq!(Some(Group::ID(0)), group(b"0").unwrap().1);
+        assert_eq!(Some(Group::ID(42)), group(b"42").unwrap().1);
+        assert_eq!(
+            Some(Group::Name(OsStr::new("root"))),
+            group(b"root").unwrap().1
+        );
+        assert_eq!(
+            Some(Group::Name(OsStr::new("nogroup"))),
+            group(b"nogroup").unwrap().1
+        );
+        assert_eq!(None, group(b"-").unwrap().1);
+    }
+
+    #[test]
     fn test_parse_line() {
         assert_eq!(
             Action {
@@ -274,7 +310,7 @@ mod test {
                     mode: Permissions::from_mode(0o755)
                 }),
                 user: Some(User::Name(OsStr::new("daemon"))),
-                group: "daemon",
+                group: Some(Group::Name(OsStr::new("daemon"))),
                 age: "-",
                 argument: "-",
                 boot_only: false,
@@ -295,7 +331,7 @@ mod test {
                     mode: Permissions::from_mode(0o755)
                 }),
                 user: Some(User::Name(OsStr::new("daemon"))),
-                group: "daemon",
+                group: Some(Group::Name(OsStr::new("daemon"))),
                 age: "-",
                 argument: "-",
                 boot_only: false,
