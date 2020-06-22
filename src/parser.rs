@@ -4,11 +4,11 @@ use std::fs::Permissions;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 
-use btoi::btoi_radix;
+use btoi::{btoi, btoi_radix};
 
 use nom::branch::alt;
 use nom::bytes::complete::take_till;
-use nom::character::complete::{char, oct_digit1, one_of, space1};
+use nom::character::complete::{char, digit1, oct_digit1, one_of, space1};
 use nom::combinator::{map, map_res, opt};
 use nom::sequence::tuple;
 use nom::IResult;
@@ -46,11 +46,17 @@ pub struct Mode {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum User<'a> {
+    Name(&'a OsStr),
+    ID(u32),
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Action<'a> {
     action_type: ItemTypes,
     path: &'a OsStr,
     mode: Option<Mode>,
-    user: &'a str,
+    user: Option<User<'a>>,
     group: &'a str,
     age: &'a str,
     argument: &'a str,
@@ -129,11 +135,38 @@ fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
     ))
 }
 
+fn user_or_group_id(input: &[u8]) -> IResult<&[u8], u32> {
+    map(digit1, |uid| btoi(uid).unwrap())(input)
+}
+
+fn user_or_group_name(input: &[u8]) -> IResult<&[u8], &OsStr> {
+    // TODO the user/group name parsing is kept simple until
+    // we have a better specification.
+    let (input, chars) = take_till(|c| (c as char).is_whitespace())(input)?;
+    Ok((input, OsStr::from_bytes(chars)))
+}
+
+fn user(input: &[u8]) -> IResult<&[u8], Option<User>> {
+    alt((
+        map(empty_placeholder, |_| None),
+        map(
+            alt((
+                map(user_or_group_id, |uid| User::ID(uid)),
+                map(user_or_group_name, |username| User::Name(username)),
+            )),
+            |user| Some(user),
+        ),
+    ))(input)
+}
+
 fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, (action_type, boot_only, append_or_force, allow_failure)) = item_type(input)?;
     let (input, path_os_str) = path(input)?;
     let (input, _) = space1(input)?;
     let (input, mode) = mode(input)?;
+    let (input, _) = space1(input)?;
+    let (input, user) = user(input)?;
+
 
     Ok((
         input,
@@ -141,7 +174,7 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
             action_type,
             path: path_os_str,
             mode: mode,
-            user: "daemon",
+            user: user,
             group: "daemon",
             age: "-",
             argument: "-",
@@ -216,6 +249,21 @@ mod test {
     }
 
     #[test]
+    fn test_user() {
+        assert_eq!(Some(User::ID(0)), user(b"0").unwrap().1);
+        assert_eq!(Some(User::ID(42)), user(b"42").unwrap().1);
+        assert_eq!(
+            Some(User::Name(OsStr::new("root"))),
+            user(b"root").unwrap().1
+        );
+        assert_eq!(
+            Some(User::Name(OsStr::new("nobody"))),
+            user(b"nobody").unwrap().1
+        );
+        assert_eq!(None, user(b"-").unwrap().1);
+    }
+
+    #[test]
     fn test_parse_line() {
         assert_eq!(
             Action {
@@ -225,7 +273,7 @@ mod test {
                     masked: false,
                     mode: Permissions::from_mode(0o755)
                 }),
-                user: "daemon",
+                user: Some(User::Name(OsStr::new("daemon"))),
                 group: "daemon",
                 age: "-",
                 argument: "-",
@@ -246,7 +294,7 @@ mod test {
                     masked: false,
                     mode: Permissions::from_mode(0o755)
                 }),
-                user: "daemon",
+                user: Some(User::Name(OsStr::new("daemon"))),
                 group: "daemon",
                 age: "-",
                 argument: "-",
