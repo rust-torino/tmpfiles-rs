@@ -7,10 +7,11 @@ use std::os::unix::fs::PermissionsExt;
 use btoi::{btoi, btoi_radix};
 
 use nom::branch::alt;
-use nom::bytes::complete::take_till;
-use nom::character::complete::{char, digit1, oct_digit1, one_of, space1};
+use nom::bytes::complete::{tag, take_till, take_while_m_n};
+use nom::character::complete::{char, digit1, one_of, space1};
+use nom::character::is_oct_digit;
 use nom::combinator::{map, map_res, opt};
-use nom::sequence::tuple;
+use nom::sequence::{preceded, tuple};
 use nom::IResult;
 
 // NOTE: taken from systemd source code
@@ -119,19 +120,18 @@ fn path(input: &[u8]) -> IResult<&[u8], &OsStr> {
     Ok((input, OsStr::from_bytes(path_bytes)))
 }
 
-fn mode(input: &[u8]) -> IResult<&[u8], Option<Mode>> {
-    alt((
-        map(empty_placeholder, |_| None),
-        map(non_empty_mode, |mode| Some(mode)),
-    ))(input)
-}
-
 fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
     let (input, masked) = opt(char('~'))(input)?;
-    let (input, mode_digits) = oct_digit1(input)?;
+    let (input, mode_digits) = preceded(
+        opt(tag(b"0")),
+        alt((
+            take_while_m_n(4, 4, is_oct_digit),
+            take_while_m_n(3, 3, is_oct_digit),
+        )),
+    )(input)?;
 
     let octal_permission = btoi_radix(mode_digits, 8).unwrap();
-
+    println!("perm: {:o}", octal_permission);
     Ok((
         input,
         Mode {
@@ -139,6 +139,13 @@ fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
             mode: Permissions::from_mode(octal_permission),
         },
     ))
+}
+
+fn mode(input: &[u8]) -> IResult<&[u8], Option<Mode>> {
+    alt((
+        map(empty_placeholder, |_| None),
+        map(non_empty_mode, |mode| Some(mode)),
+    ))(input)
 }
 
 fn user_or_group_id(input: &[u8]) -> IResult<&[u8], u32> {
@@ -187,7 +194,6 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, user) = user(input)?;
     let (input, _) = space1(input)?;
     let (input, group) = group(input)?;
-
 
     Ok((
         input,
