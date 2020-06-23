@@ -131,7 +131,6 @@ fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
     )(input)?;
 
     let octal_permission = btoi_radix(mode_digits, 8).unwrap();
-    println!("perm: {:o}", octal_permission);
     Ok((
         input,
         Mode {
@@ -144,7 +143,7 @@ fn non_empty_mode(input: &[u8]) -> IResult<&[u8], Mode> {
 fn mode(input: &[u8]) -> IResult<&[u8], Option<Mode>> {
     alt((
         map(empty_placeholder, |_| None),
-        map(non_empty_mode, |mode| Some(mode)),
+        map(non_empty_mode, Some),
     ))(input)
 }
 
@@ -164,10 +163,10 @@ fn user(input: &[u8]) -> IResult<&[u8], Option<User>> {
         map(empty_placeholder, |_| None),
         map(
             alt((
-                map(user_or_group_id, |uid| User::ID(uid)),
-                map(user_or_group_name, |username| User::Name(username)),
+                map(user_or_group_id, User::ID),
+                map(user_or_group_name, User::Name),
             )),
-            |user| Some(user),
+            Some,
         ),
     ))(input)
 }
@@ -177,10 +176,10 @@ fn group(input: &[u8]) -> IResult<&[u8], Option<Group>> {
         map(empty_placeholder, |_| None),
         map(
             alt((
-                map(user_or_group_id, |gid| Group::ID(gid)),
-                map(user_or_group_name, |groupname| Group::Name(groupname)),
+                map(user_or_group_id, Group::ID),
+                map(user_or_group_name, Group::Name),
             )),
-            |group| Some(group),
+            Some,
         ),
     ))(input)
 }
@@ -200,9 +199,9 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
         Action {
             action_type,
             path: path_os_str,
-            mode: mode,
-            user: user,
-            group: group,
+            mode,
+            user,
+            group,
             age: "-",
             argument: "-",
             boot_only,
