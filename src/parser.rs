@@ -10,7 +10,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, take_till, take_while_m_n};
 use nom::character::complete::{char, digit1, one_of, space1};
 use nom::character::is_oct_digit;
-use nom::combinator::{map, map_res, opt, peek};
+use nom::combinator::{all_consuming, map, map_res, opt, peek, rest};
 use nom::sequence::{preceded, terminated, tuple};
 use nom::IResult;
 
@@ -80,7 +80,7 @@ pub struct Action<'a> {
     user: Option<User<'a>>,
     group: Option<Group<'a>>,
     age: Option<CleanupAge>,
-    argument: &'a str,
+    argument: Option<&'a OsStr>,
     boot_only: bool,
     append_or_force: bool,
     allow_failure: bool,
@@ -306,6 +306,20 @@ fn age(input: &[u8]) -> IResult<&[u8], Option<CleanupAge>> {
     ))
 }
 
+#[rustfmt::skip]
+fn argument(input: &[u8]) -> IResult<&[u8], Option<&OsStr>> {
+    alt((
+        map(
+            all_consuming( alt(( tag("-"), tag("") )) ),
+            |_| None
+        ),
+        map(
+            rest,
+            |arg| Some(OsStr::from_bytes(arg))
+        )
+    ))(input)
+}
+
 fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, (action_type, boot_only, append_or_force, allow_failure)) = item_type(input)?;
     let (input, path_os_str) = path(input)?;
@@ -318,6 +332,7 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
     let (input, _) = space1(input)?;
     let (input, age) = age(input)?;
     let (input, _) = space1(input)?;
+    let (input, argument) = argument(input)?;
 
     Ok((
         input,
@@ -328,7 +343,7 @@ fn parse_line(input: &[u8]) -> IResult<&[u8], Action> {
             user,
             group,
             age,
-            argument: "-",
+            argument,
             boot_only,
             append_or_force,
             allow_failure,
@@ -467,6 +482,22 @@ mod test {
     }
 
     #[test]
+    fn test_argument() {
+        assert_eq!(None, argument(b"-").unwrap().1);
+
+        assert_eq!(None, argument(b"").unwrap().1);
+
+        assert_eq!(
+            Some(OsStr::new(
+                "Egg and bacon\n Egg, sausage and bacon\nEgg and Spam"
+            )),
+            argument(b"Egg and bacon\n Egg, sausage and bacon\nEgg and Spam")
+                .unwrap()
+                .1
+        );
+    }
+
+    #[test]
     fn test_parse_line() {
         assert_eq!(
             Action {
@@ -479,7 +510,7 @@ mod test {
                 user: Some(User::Name(OsStr::new("daemon"))),
                 group: Some(Group::Name(OsStr::new("daemon"))),
                 age: None,
-                argument: "-",
+                argument: None,
                 boot_only: false,
                 append_or_force: false,
                 allow_failure: false,
@@ -500,7 +531,7 @@ mod test {
                 user: Some(User::Name(OsStr::new("daemon"))),
                 group: Some(Group::Name(OsStr::new("daemon"))),
                 age: None,
-                argument: "-",
+                argument: None,
                 boot_only: false,
                 append_or_force: false,
                 allow_failure: false,
@@ -524,12 +555,33 @@ mod test {
                     age: 97_200_000_000,
                     keep_first_level: false
                 }),
-                argument: "-",
+                argument: None,
                 boot_only: false,
                 append_or_force: false,
                 allow_failure: false,
             },
             parse_line(b"d     /tmp/z/f    0755 daemon daemon 1d3h -")
+                .unwrap()
+                .1
+        );
+
+        assert_eq!(
+            Action {
+                action_type: ItemTypes::CREATE_DIRECTORY,
+                path: &OsStr::new("/tmp/z/f"),
+                mode: Some(Mode {
+                    masked: false,
+                    mode: Permissions::from_mode(0o755)
+                }),
+                user: Some(User::Name(OsStr::new("daemon"))),
+                group: Some(Group::Name(OsStr::new("daemon"))),
+                age: None,
+                argument: Some(OsStr::new("/tmp/C/1-origin")),
+                boot_only: false,
+                append_or_force: false,
+                allow_failure: false,
+            },
+            parse_line(b"d  /tmp/z/f    0755 daemon daemon - /tmp/C/1-origin")
                 .unwrap()
                 .1
         );
