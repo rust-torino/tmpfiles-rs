@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.2.16"
+nom = "5.1.2"
+btoi = "0.4.2"
