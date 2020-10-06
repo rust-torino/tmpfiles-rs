@@ -7,34 +7,68 @@ use std::os::unix::fs::PermissionsExt;
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq)]
 pub enum ItemTypes {
-    CREATE_DIRECTORY,
-    _CREATE_SUBVOLUME,
-    _CREATE_SUBVOLUME_INHERIT_QUOTA,
-    _CREATE_SUBVOLUME_NEW_QUOTA,
-    _EMPTY_DIRECTORY,
-    _TRUNCATE_DIRECTORY,
-    _CREATE_FIFO,
-    _IGNORE_PATH,
-    _IGNORE_DIRECTORY_PATH,
-    _REMOVE_PATH,
-    _RECURSIVE_REMOVE_PATH,
-    _ADJUST_MODE,
-    RELABEL_PATH,
-    _RECURSIVE_RELABEL_PATH,
     CREATE_FILE,
-    _TRUNCATE_FILE,
-    // TODO: adds missing cases
+    // TRUNCATE_FILE, DEPRECATED
+    CREATE_DIRECTORY,
+    TRUNCATE_DIRECTORY,
+    CREATE_SUBVOLUME,
+    CREATE_SUBVOLUME_INHERIT_QUOTA,
+    CREATE_SUBVOLUME_NEW_QUOTA,
+    CREATE_FIFO,
+    CREATE_SYMLINK,
+    CREATE_BLOCK_DEVICE,
+    CREATE_CHAR_DEVICE,
+    COPY_FILES,
+
+    WRITE_FILE,
+    EMPTY_DIRECTORY,
+    SET_XATTR,
+    RECURSIVE_SET_XATTR,
+    SET_ACL,
+    RECURSIVE_SET_ACL,
+    SET_ATTRIBUTE,
+    RECURSIVE_SET_ATTRIBUTE,
+    IGNORE_PATH,
+    IGNORE_DIRECTORY_PATH,
+    REMOVE_PATH,
+    RECURSIVE_REMOVE_PATH,
+    // ADJUST_MODE, legacy same as RELABEL_PATH
+    RELABEL_PATH,
+    RECURSIVE_RELABEL_PATH,
 }
 
 impl TryFrom<char> for ItemTypes {
-    type Error = &'static str;
+    type Error = String;
 
     fn try_from(type_char: char) -> Result<Self, Self::Error> {
         match type_char {
-            'd' => Ok(ItemTypes::CREATE_DIRECTORY),
             'f' => Ok(ItemTypes::CREATE_FILE),
+            'd' => Ok(ItemTypes::CREATE_DIRECTORY),
+            'D' => Ok(ItemTypes::TRUNCATE_DIRECTORY),
+            'v' => Ok(ItemTypes::CREATE_SUBVOLUME),
+            'q' => Ok(ItemTypes::CREATE_SUBVOLUME_INHERIT_QUOTA),
+            'Q' => Ok(ItemTypes::CREATE_SUBVOLUME_NEW_QUOTA),
+            'p' => Ok(ItemTypes::CREATE_FIFO),
+            'L' => Ok(ItemTypes::CREATE_SYMLINK),
+            'b' => Ok(ItemTypes::CREATE_BLOCK_DEVICE),
+            'c' => Ok(ItemTypes::CREATE_CHAR_DEVICE),
+            'C' => Ok(ItemTypes::COPY_FILES),
+
+            'w' => Ok(ItemTypes::WRITE_FILE),
+            'e' => Ok(ItemTypes::EMPTY_DIRECTORY),
+            't' => Ok(ItemTypes::SET_XATTR),
+            'T' => Ok(ItemTypes::RECURSIVE_SET_XATTR),
+            'a' => Ok(ItemTypes::SET_ACL),
+            'A' => Ok(ItemTypes::RECURSIVE_SET_ACL),
+            'h' => Ok(ItemTypes::SET_ATTRIBUTE),
+            'H' => Ok(ItemTypes::RECURSIVE_SET_ATTRIBUTE),
+            'x' => Ok(ItemTypes::IGNORE_PATH),
+            'X' => Ok(ItemTypes::IGNORE_DIRECTORY_PATH),
+            'r' => Ok(ItemTypes::REMOVE_PATH),
+            'R' => Ok(ItemTypes::RECURSIVE_REMOVE_PATH),
             'z' => Ok(ItemTypes::RELABEL_PATH),
-            other => todo!("Support for type `{}` is missing", other),
+            'Z' => Ok(ItemTypes::RECURSIVE_RELABEL_PATH),
+            invalid => Err(format!("Invalid item type: '{}'", invalid)),
         }
     }
 }
